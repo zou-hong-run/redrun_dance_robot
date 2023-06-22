@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title></title>
+</head>
+<style type="text/css">
+    * {
+        margin: 0;
+        padding: 0;
+    }
+
+    html,
+    body {
+        height: 100%;
+        width: 100%;
+        background-color: #3f3f3f;
+    }
+
+    canvas {
+        height: calc(100% - 200px);
+        width: 100%;
+    }
+
+
+    button {
+        height: 100px;
+        margin: auto;
+        background-color: transparent;
+        border-radius: 50%;
+        width: 100px;
+        height: 100px;
+    }
+</style>
+
+<body>
+    <audio id="audio" loop>
+        Your browser does not support the audio element.
+    </audio>
+    <canvas id="canvas">Your browser
+        does not support Canvas tag.
+    </canvas>
+    <button>播放</button>
+    <div class="content" style="width:100px;height:100px;"></div>
+    <!-- <input id="fileChooser" type="file" /> -->
+</body>
+
+<script>
+    // websocket连接
+    const socket = new WebSocket('ws://' + location.host + '/move');
+    let content = document.querySelector('.content')
+    // 防抖函数 防止服务器接受大量请求
+    const throttle = (func, interval) => {
+        let last = 0;
+        return function () {
+            let args = arguments
+            let now = Date.now();
+            if (now - last > interval) {
+                func.apply(this, args)
+                last = now
+            }
+        }
+    }
+    socket.addEventListener('message', ev => {
+        setContent('收到消息' + ev.data, 'blue');
+    });
+    socket.addEventListener('close', ev => {
+        setContent('连接关闭' + ev.data, 'blue');
+    });
+
+
+    const setContent = (text, color) => {
+        content.innerHTML = `<span style="color: ${color}">${text}</span><br>`
+    }
+    function loadSound(url) {
+            return new Promise((resolve) => {
+                const request = new XMLHttpRequest(); //建立一个请求
+                request.open('GET', url, true); //配置好请求类型，文件路径等
+                request.responseType = 'arraybuffer'; //配置数据返回类型
+                // 一旦获取完成，对音频进行进一步操作，比如解码
+                request.onload = () => {
+                    resolve(request.response);
+                }
+                request.send();
+            });
+    }
+    /**
+    * ArrayBuffer 转 AudioBuffer
+    * @param arrayBuffer
+    * @returns {Promise}
+    */
+    function bufferToAudio(arrayBuffer) {
+        return new Promise((resolve, reject) => {
+            audioContext.decodeAudioData(
+                arrayBuffer,
+                (res) => {
+                    resolve(res);
+                },
+                (err) => {
+                    reject(err);
+                }
+            );
+        });
+    }
+    let btn = document.querySelector("button")
+    btn.addEventListener("click", () => {
+        
+
+        // 兼容
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        // 创建音频播放节点
+        const audioBufferSourceNode = audioContext.createBufferSource();
+        audioBufferSourceNode.connect(audioContext.destination);    // 连接到AudioContext对象
+
+        // 弄个函数，方便异步编程
+        async function init() {
+            // 可以使用的音乐在线地址
+            const arrayBuffer = await loadSound("http://192.168.31.216:3000/bg.mp3");
+            // 把arrayBuffer转换成audioBuffer
+            const audioBuffer = await bufferToAudio(arrayBuffer);
+            // 绑定音频对象
+            audioBufferSourceNode.buffer = audioBuffer;
+        }
+
+        init();
+
+        let analyser = audioContext.createAnalyser();
+        audioBufferSourceNode.connect(analyser)
+        analyser.fftSize = 1024;
+
+
+        // let audioSrc = audioContext.createMediaElementSource(audio);
+        // audioSrc.connect(analyser);
+        // analyser.connect(audioContext.destination);
+
+        let canvas = document.getElementById('canvas');
+
+        let ctx = canvas.getContext("2d");
+        ctx.lineWidth = 2;
+        let grd = ctx.createLinearGradient(0, 0, 1200, 0);
+        grd.addColorStop(0, "#00d0ff");
+        grd.addColorStop(1, "#efefef");
+
+        let grd2 = ctx.createLinearGradient(0, 0, 1200, 0);
+        grd2.addColorStop(0, "#FEE082");
+        grd2.addColorStop(1, "#FFFFFF");
+        let het = 0;
+
+        let timer = 0
+        let temp = 0
+        function render() {
+            let nows = Date.now()
+            let common = 80
+            let w = 1
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            let dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+            ctx.beginPath();
+
+            let run = true
+
+            for (let i = 0; i < 200; i++) {
+                let value = dataArray[6 * i];
+                
+                if (nows - timer > 500) {
+                    if (value >= 360) {
+                        value = 360
+                    } else if (value <= 0) {
+                        value = 0
+                    } else {
+                        value = value
+                    }
+                    
+                    if(temp==value){
+                        value = Math.ceil(Math.random()*180)
+                    }
+                    socket.send(value)
+                    temp = value
+                    timer = nows
+                }
+
+                ctx.fillStyle = grd;
+                ctx.fillRect(i * 5, common, w, -value + 100);
+                ctx.fillRect(i * 5, 280 - value, w, het);
+                ctx.fillStyle = grd2;
+                ctx.fillRect(i * 5, common, w, value - 100);
+                ctx.fillRect(i * 5, 320 + value, w, het);
+            }
+            requestAnimationFrame(render);
+        }
+        render()
+        audioBufferSourceNode.isStart = true
+        audioBufferSourceNode.start(1)
+    })
+
+</script>
+
+</html>
